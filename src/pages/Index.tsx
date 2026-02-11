@@ -8,7 +8,7 @@ import { AudioLevelMeter } from "@/components/AudioLevelMeter";
 import { DebugPanel } from "@/components/DebugPanel";
 import { ConversationHistory, ConversationEntry } from "@/components/ConversationHistory";
 
-type AppState = "idle" | "listening" | "stopped" | "playback" | "thinking" | "speaking" | "error";
+type AppState = "idle" | "listening" | "stopped" | "thinking" | "speaking" | "error";
 
 const Index = () => {
   const {
@@ -28,15 +28,14 @@ const Index = () => {
   const [transcript, setTranscript] = useState("");
   const [aiResponse, setAiResponse] = useState("");
   const [conversations, setConversations] = useState<ConversationEntry[]>([]);
-  const [playbackVerified, setPlaybackVerified] = useState(false);
-  const playbackAudioRef = useRef<HTMLAudioElement | null>(null);
+  const hasSentRef = useRef(false);
   const recognitionRef = useRef<any>(null);
   const idCounter = useRef(0);
 
   const handleStart = useCallback(() => {
     setTranscript("");
     setAiResponse("");
-    setPlaybackVerified(false);
+    hasSentRef.current = false;
 
     // Start SpeechRecognition in parallel for transcript
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
@@ -58,55 +57,17 @@ const Index = () => {
     setAppState("listening");
   }, [startRecording]);
 
-  const handleStop = useCallback(() => {
-    stopRecording();
-    recognitionRef.current?.stop();
-    setAppState("stopped");
-  }, [stopRecording]);
-
-  // When recStatus changes to "stopped" from outside (auto-stop)
-  // sync appState
-  const prevRecStatus = useRef(recStatus);
-  if (recStatus === "stopped" && prevRecStatus.current === "recording" && appState === "listening") {
-    setAppState("stopped");
-    recognitionRef.current?.stop();
-  }
-  prevRecStatus.current = recStatus;
-
-  const handlePlayback = useCallback(() => {
-    if (!audioUrl) return;
-    setAppState("playback");
-    const audio = new Audio(audioUrl);
-    playbackAudioRef.current = audio;
-    audio.onended = () => {
-      setPlaybackVerified(true);
-      setAppState("stopped");
-    };
-    audio.play().catch(() => {
-      setPlaybackVerified(true); // allow proceeding even if playback fails on some browsers
-      setAppState("stopped");
-    });
-  }, [audioUrl]);
-
-  const handleSendToAI = useCallback(() => {
+  const sendToAI = useCallback((userText: string) => {
     setAppState("thinking");
-
-    // Simulate backend processing delay
     setTimeout(() => {
-      const userText = transcript || "Could not transcribe audio";
       const response = getAdvisorResponse(userText);
       setAiResponse(response);
-
-      // Add to conversation history (keep last 3)
       idCounter.current += 1;
       setConversations((prev) => [
         { id: idCounter.current, userText, aiText: response },
         ...prev,
       ].slice(0, 3));
-
       setAppState("speaking");
-
-      // Speak the response
       const utterance = new SpeechSynthesisUtterance(response);
       utterance.rate = 0.9;
       utterance.pitch = 1;
@@ -116,7 +77,28 @@ const Index = () => {
       };
       speechSynthesis.speak(utterance);
     }, 1500);
-  }, [transcript, reset]);
+  }, [reset]);
+
+  const handleStop = useCallback(() => {
+    stopRecording();
+    recognitionRef.current?.stop();
+    setAppState("stopped");
+  }, [stopRecording]);
+
+  // Auto-send to AI when recording stops
+  const prevRecStatus = useRef(recStatus);
+  if (recStatus === "stopped" && prevRecStatus.current === "recording" && !hasSentRef.current) {
+    hasSentRef.current = true;
+    if (appState === "listening") {
+      recognitionRef.current?.stop();
+    }
+    // Small delay to let SpeechRecognition finalize transcript
+    setTimeout(() => {
+      const userText = transcript || "Could not transcribe audio";
+      sendToAI(userText);
+    }, 500);
+  }
+  prevRecStatus.current = recStatus;
 
   const handleReset = useCallback(() => {
     speechSynthesis.cancel();
@@ -124,7 +106,7 @@ const Index = () => {
     setAppState("idle");
     setTranscript("");
     setAiResponse("");
-    setPlaybackVerified(false);
+    hasSentRef.current = false;
   }, [reset]);
 
   const effectiveState: AppState =
@@ -164,34 +146,6 @@ const Index = () => {
           message={errorMessage || undefined}
         />
 
-        {/* Post-recording actions */}
-        {recStatus === "stopped" && audioUrl && appState !== "thinking" && appState !== "speaking" && (
-          <div className="flex flex-col items-center gap-3 animate-in fade-in duration-300">
-            {!playbackVerified ? (
-              <button
-                onClick={handlePlayback}
-                className="rounded-lg border bg-card px-6 py-2 text-sm font-medium text-foreground shadow-sm transition-all hover:bg-accent hover:shadow-md active:scale-95"
-              >
-                ▶ Play Back Your Recording
-              </button>
-            ) : (
-              <div className="flex gap-3">
-                <button
-                  onClick={handleSendToAI}
-                  className="rounded-lg bg-primary px-6 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:opacity-90 active:scale-95"
-                >
-                  ✅ Send to AI Advisor
-                </button>
-                <button
-                  onClick={handleReset}
-                  className="rounded-lg border bg-card px-4 py-2 text-sm text-muted-foreground transition-all hover:bg-accent active:scale-95"
-                >
-                  Re-record
-                </button>
-              </div>
-            )}
-          </div>
-        )}
 
         {/* Transcript */}
         {transcript && appState !== "idle" && (
