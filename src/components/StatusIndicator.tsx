@@ -1,5 +1,5 @@
 interface StatusIndicatorProps {
-  status: "idle" | "listening" | "thinking" | "speaking" | "error" | "playback" | "stopped";
+  status: "idle" | "listening" | "thinking" | "speaking" | "error" | "stopped";
   message?: string;
 }
 
